@@ -142,13 +142,19 @@ function uid() { return Math.random().toString(36).slice(2) }
 
 function openPdf(url) {
   if (!url || url === '#') return
-  // Backend paths like "/documents/{doc_id}/pdf" are relative — resolving
-  // them against the frontend's own origin (not the ngrok backend) is why
-  // every "open PDF" action was silently failing.
+  const base = CURRENT_API_BASE || 'https://0cf5-136-108-84-252.ngrok-free.app';
   const full = /^https?:\/\//i.test(url)
     ? url
-    : `${CURRENT_API_BASE}${url.startsWith('/') ? '' : '/'}${url}`
-  window.open(full, '_blank', 'noopener,noreferrer')
+    : `${base}${url.startsWith('/') ? '' : '/'}${url}`
+    
+  // Create an anchor tag to ensure browser popup blockers don't block window.open in iframes
+  const a = document.createElement('a');
+  a.href = full;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
 }
 
 const WS_COLORS = ['#004B50', '#B19470', '#5C7C7A', '#9A4B3C', '#2E7D32', '#7B5EA7']
@@ -743,10 +749,9 @@ function SourceDrawer({ article, onClose }) {
 // TIMELINE (inline - uses articles directly)
 // ─────────────────────────────────────────────────────────────────────────────
 function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genErr }) {
-  const [hoveredId, setHoveredId] = useState(null)
   const sorted = [...articles]
     .filter(a => a.date && a.date !== '1970-01-01')
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) // sort newest first
 
   if (sorted.length === 0) return (
     <div style={{ maxWidth: 420, padding: '60px 32px', textAlign: 'center', margin: '0 auto' }}>
@@ -772,66 +777,85 @@ function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genEr
     </div>
   )
 
-  const first = new Date(sorted[0].date).getTime()
-  const last = new Date(sorted[sorted.length - 1].date).getTime()
-  const span = Math.max(last - first, 1)
-
   return (
-    <div className="scroll-thin" style={{ overflowX: 'auto', padding: '32px' }}>
-      <div style={{
-        display: 'flex', justifyContent: 'space-between', marginBottom: 12,
-        fontSize: 11.5, color: C.inkSoft, ...mono
-      }}>
-        <span>{formatDate(sorted[0].date)}</span>
-        <span>{sorted.length} entries · chronological</span>
-        <span>{formatDate(sorted[sorted.length - 1].date)}</span>
+    <div style={{ minHeight: 'calc(100vh - 230px)', padding: '40px 64px 160px', background: '#F9F8F5' }}>
+      <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
+        <div style={{ fontSize: 12.5, color: C.inkSoft, ...mono }}>
+          {sorted.length} entries · newest first
+        </div>
+        {onGenerate && (
+          <button onClick={onGenerate} disabled={generating || !canGenerate}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 14px',
+              background: '#fff', color: canGenerate ? C.teal900 : C.inkSoft,
+              border: `1px solid ${canGenerate ? C.teal900 : C.lineStrong}`, borderRadius: 16,
+              fontSize: 12.5, fontWeight: 600, cursor: generating || !canGenerate ? 'not-allowed' : 'pointer',
+              opacity: generating ? .7 : 1, transition: 'all .15s', boxShadow: '0 2px 4px rgba(0,0,0,0.02)'
+            }}>
+            {generating ? <Loader size={13} className="spin" /> : <Clock size={13} />}
+            {generating ? 'Updating…' : 'Update Timeline'}
+          </button>
+        )}
       </div>
-      <div style={{ position: 'relative', minWidth: 600, height: 260 }}>
+
+      <div style={{ position: 'relative', maxWidth: 860, margin: '0 auto' }}>
+        {/* Vertical Track Line */}
         <div style={{
-          position: 'absolute', left: 0, right: 0, top: '50%', height: 2,
-          background: C.line, transform: 'translateY(-50%)'
+          position: 'absolute', top: 12, bottom: 24, left: 21, width: 2,
+          background: C.lineStrong, borderRadius: 2
         }} />
-        {sorted.map((a, i) => {
-          const pct = ((new Date(a.date).getTime() - first) / span) * 100
-          const up = i % 2 === 0
-          const active = hoveredId === a.id
-          return (
-            <div key={a.id} style={{
-              position: 'absolute', left: `${pct}%`, top: '50%',
-              transform: 'translateX(-50%)'
-            }}
-              onMouseEnter={() => setHoveredId(a.id)} onMouseLeave={() => setHoveredId(null)}>
+
+        {sorted.map((a, i) => (
+          <div key={a.id + i} style={{
+            position: 'relative', display: 'flex', gap: 24, paddingBottom: i === sorted.length - 1 ? 0 : 36
+          }}>
+            {/* Dot */}
+            <div style={{
+              width: 14, height: 14, borderRadius: '50%', background: '#fff',
+              border: `3px solid ${C.teal800}`, position: 'relative', zIndex: 2,
+              marginTop: 22, marginLeft: 15, flexShrink: 0
+            }} />
+            
+            {/* Content Card */}
+            <button onClick={() => { if (a.pdfUrl) openPdf(a.pdfUrl); else onOpen(a) }}
+              style={{
+                flex: 1, background: '#fff', border: `1px solid ${C.line}`,
+                borderRadius: 14, padding: '18px 22px', textAlign: 'left',
+                cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
+                boxShadow: '0 4px 12px rgba(0,0,0,0.03)', transition: 'all .2s ease-out'
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,61,66,.1)';
+                e.currentTarget.style.borderColor = C.tan;
+                e.currentTarget.style.transform = 'translateY(-2px)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.03)';
+                e.currentTarget.style.borderColor = C.line;
+                e.currentTarget.style.transform = 'translateY(0)';
+              }}>
+              <div style={{ ...mono, fontSize: 11.5, color: C.inkSoft }}>
+                {formatDate(a.date)}
+              </div>
               <div style={{
-                position: 'absolute', left: '50%', transform: 'translateX(-50%)',
-                width: 1, background: active ? C.tan : C.lineStrong,
-                height: 50, ...(up ? { bottom: 8 } : { top: 8 })
-              }} />
-              <div style={{
-                width: 10, height: 10, borderRadius: '50%', border: `2px solid ${active ? C.tan : C.lineStrong}`,
-                background: active ? C.tan : '#fff', position: 'relative', zIndex: 2,
-                transform: 'translateY(-50%)', transition: 'all .15s'
-              }} />
-              <button onClick={() => { if (a.pdfUrl) openPdf(a.pdfUrl); else onOpen(a) }}
-                style={{
-                  position: 'absolute', left: '50%',
-                  ...(up ? { bottom: 62, transform: 'translateX(-50%)' } : { top: 18, transform: 'translateX(-50%)' }),
-                  background: '#fff', border: `1px solid ${active ? C.tan : C.line}`,
-                  borderRadius: 8, padding: '8px 11px', cursor: 'pointer',
-                  boxShadow: active ? '0 4px 12px rgba(0,61,66,.12)' : 'none',
-                  width: 160, textAlign: 'center', transition: 'all .15s'
-                }}>
-                <div style={{ ...mono, fontSize: 10, color: C.inkSoft, marginBottom: 3 }}>
-                  {formatDate(a.date)}
-                </div>
+                ...serif, fontSize: 18, fontWeight: 600, color: C.teal900,
+                lineHeight: 1.4
+              }}>
+                {a.title}
+              </div>
+              {a.excerpt && (
                 <div style={{
-                  ...serif, fontSize: 12, fontWeight: 600, color: C.teal900,
-                  lineHeight: 1.3, display: '-webkit-box', WebkitLineClamp: 2,
-                  WebkitBoxOrient: 'vertical', overflow: 'hidden'
-                }}>{a.title}</div>
-              </button>
-            </div>
-          )
-        })}
+                  fontSize: 14.5, color: C.ink, lineHeight: 1.6,
+                  display: '-webkit-box', WebkitLineClamp: 4,
+                  WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: 6,
+                  opacity: 0.9
+                }}>
+                  {a.excerpt}
+                </div>
+              )}
+            </button>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -918,7 +942,7 @@ function EntityGraph({ graph, onSelectEntity, onGenerate, generating, canGenerat
         const a = nodes[i].id, b = nodes[j].id
         const dx = pos[a].x - pos[b].x, dy = pos[a].y - pos[b].y
         const d = Math.max(Math.sqrt(dx * dx + dy * dy), .01)
-        const f = 2800 / (d * d)
+        const f = 3500 / (d * d) // increase repulsion slightly
         vel[a].x += dx / d * f; vel[a].y += dy / d * f
         vel[b].x -= dx / d * f; vel[b].y -= dy / d * f
       }
@@ -927,14 +951,14 @@ function EntityGraph({ graph, onSelectEntity, onGenerate, generating, canGenerat
         if (!pos[a] || !pos[b]) return
         const dx = pos[b].x - pos[a].x, dy = pos[b].y - pos[a].y
         const d = Math.max(Math.sqrt(dx * dx + dy * dy), .01)
-        const f = (d - 140) * .018
+        const f = (d - 90) * .025 // shorter springs, stronger pull
         const fx = dx / d * f, fy = dy / d * f
         vel[a].x += fx; vel[a].y += fy; vel[b].x -= fx; vel[b].y -= fy
       })
       // center pull + integrate
       nodes.forEach(({ id }: any) => {
-        vel[id].x += (w / 2 - pos[id].x) * .002; vel[id].y += (h / 2 - pos[id].y) * .002
-        vel[id].x *= .82; vel[id].y *= .82
+        vel[id].x += (w / 2 - pos[id].x) * .005; vel[id].y += (h / 2 - pos[id].y) * .005 // stronger center gravity
+        vel[id].x *= .78; vel[id].y *= .78 // more friction so they settle faster
         pos[id].x = Math.min(w - 70, Math.max(70, pos[id].x + vel[id].x))
         pos[id].y = Math.min(h - 70, Math.max(70, pos[id].y + vel[id].y))
       })
@@ -974,34 +998,44 @@ function EntityGraph({ graph, onSelectEntity, onGenerate, generating, canGenerat
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}>
-      {/* Feature 4.1: Depth Filter UI */}
+      {/* Top Bar with Filters and Update Button */}
       <div style={{
-        position: 'absolute', top: 12, right: 16, background: '#fff', padding: '12px 16px',
-        borderRadius: 10, border: `1px solid ${C.line}`, boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
-        display: 'flex', flexDirection: 'column', gap: 10, zIndex: 10, width: 220
+        position: 'absolute', top: 16, right: 16, left: 16, display: 'flex', justifyContent: 'space-between',
+        alignItems: 'flex-start', zIndex: 10, pointerEvents: 'none'
       }}>
-        {centerEntity ? (
-          <>
-            <div style={{ fontSize: 13, fontWeight: 600, color: C.teal900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-              Focus: {centerEntity}
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontSize: 12, color: C.inkSoft }}>Depth: {depth}</span>
-              <input type="range" min={1} max={3} value={depth} onChange={e => setDepth(Number(e.target.value))} style={{ width: 100, accentColor: C.teal900 }} />
-            </div>
-            <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-              <button onClick={() => setCenterEntity(null)}
-                style={{ flex: 1, padding: '6px 8px', fontSize: 11.5, background: C.creamDeep, color: C.inkSoft, border: `1px solid ${C.line}`, borderRadius: 6, cursor: 'pointer' }}>
-                Reset
-              </button>
-              <button onClick={() => onSelectEntity?.(centerEntity)}
-                style={{ flex: 2, padding: '6px 8px', fontSize: 11.5, background: C.teal800, color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer' }}>
-                Search Entity
-              </button>
-            </div>
-          </>
-        ) : (
-          <div style={{ fontSize: 12.5, color: C.inkSoft, textAlign: 'center' }}>Click a node to focus.</div>
+        <div style={{
+          background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(8px)', padding: '12px 16px',
+          borderRadius: 12, border: `1px solid ${C.line}`, boxShadow: '0 8px 24px rgba(0,0,0,0.06)',
+          display: 'flex', flexDirection: 'column', gap: 10, width: 220, pointerEvents: 'auto'
+        }}>
+          {centerEntity ? (
+            <>
+              <div style={{ fontSize: 13, fontWeight: 600, color: C.teal900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                Focus: {centerEntity}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                <span style={{ fontSize: 12, color: C.inkSoft }}>Depth: {depth}</span>
+                <input type="range" min={1} max={3} value={depth} onChange={e => setDepth(Number(e.target.value))} style={{ width: 100, accentColor: C.teal900 }} />
+              </div>
+            </>
+          ) : (
+            <div style={{ fontSize: 12.5, color: C.inkSoft, textAlign: 'center' }}>Click a node to focus.</div>
+          )}
+        </div>
+
+        {onGenerate && (
+          <button onClick={onGenerate} disabled={generating || !canGenerate}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 14px',
+              background: '#fff', color: canGenerate ? C.teal900 : C.inkSoft,
+              border: `1px solid ${canGenerate ? C.teal900 : C.lineStrong}`, borderRadius: 16,
+              fontSize: 12.5, fontWeight: 600, cursor: generating || !canGenerate ? 'not-allowed' : 'pointer',
+              opacity: generating ? .7 : 1, transition: 'all .15s', boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
+              pointerEvents: 'auto'
+            }}>
+            {generating ? <Loader size={13} className="spin" /> : <Network size={13} />}
+            {generating ? 'Updating…' : 'Update Map'}
+          </button>
         )}
       </div>
 
@@ -1011,23 +1045,27 @@ function EntityGraph({ graph, onSelectEntity, onGenerate, generating, canGenerat
           if (!pa || !pb) return null
           const dim = hovered && hovered !== a && hovered !== b
           return <line key={i} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
-            stroke={dim ? C.line : C.lineStrong} strokeWidth={dim ? .8 : 1.4} opacity={dim ? .3 : .9} />
+            stroke={dim ? C.line : C.lineStrong} strokeWidth={dim ? .8 : 1.8} opacity={dim ? .2 : .7} />
         })}
         {positions && nodes.map(n => {
           const p = positions[n.id]; if (!p) return null
-          const r = 7 + (8 * (n.weight || 1)) / maxW
+          const r = 8 + (8 * (n.weight || 1)) / maxW
           const dim = hovered && hovered !== n.id
           const color = TYPE_COLOR[n.type] || C.teal800
           return (
             <g key={n.id} transform={`translate(${p.x},${p.y})`}
-              style={{ cursor: 'pointer' }} opacity={dim ? .4 : 1}
+              style={{ cursor: 'pointer', transition: 'opacity 0.2s' }} opacity={dim ? .2 : 1}
               onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(null)}
               onClick={() => setCenterEntity(n.id)}>
-              <circle r={r} fill={color} fillOpacity={.14} stroke={color} strokeWidth={1.5} />
+              <circle r={r + 4} fill={color} fillOpacity={0} stroke={color} strokeWidth={1.5} opacity={hovered === n.id ? 1 : 0} style={{ transition: 'opacity 0.2s' }} />
+              <circle r={r} fill={color} fillOpacity={.18} stroke={color} strokeWidth={1.5} />
               <circle r={2.5} fill={color} />
-              <text textAnchor="middle" y={r + 14}
-                style={{ fontSize: 11, fill: C.ink, fontFamily: 'Inter,sans-serif', pointerEvents: 'none' }}>
-                {n.id.length > 18 ? n.id.slice(0, 18) + '…' : n.id}
+              <text textAnchor="middle" y={r + 15}
+                style={{ 
+                  fontSize: 11.5, fill: C.ink, fontWeight: 600, fontFamily: 'Inter,sans-serif', pointerEvents: 'none',
+                  textShadow: '0 1px 3px rgba(255,255,255,1), 0 0 5px rgba(255,255,255,1), 0 0 8px rgba(255,255,255,1)'
+                }}>
+                {n.id.length > 20 ? n.id.slice(0, 20) + '…' : n.id}
               </text>
             </g>
           )
@@ -1316,7 +1354,11 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
   const [dragOver, setDragOver] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'auto' }) }, [messages])
+  useEffect(() => {
+    if (!collapsed) {
+      setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'auto' }), 50)
+    }
+  }, [messages, collapsed])
 
   // Drop zone: accept dragged articles
   function handleDrop(e) {
@@ -1886,7 +1928,7 @@ export default function App() {
           )}
 
           {/* Content */}
-          <div className="scroll-thin" style={{ flex: 1, overflowY: 'auto', padding: '20px 32px 160px' }}>
+          <div className="scroll-thin" style={{ flex: 1, overflowY: 'auto', padding: activeTab === 'results' ? '20px 32px 160px' : 0 }}>
             {searching ? (
               <div style={{ maxWidth: 420, padding: '60px 0', textAlign: 'center' }}>
                 <p style={{
@@ -1922,7 +1964,7 @@ export default function App() {
                 onGenerate={generateWorkspaceIntel} generating={generatingIntel}
                 canGenerate={canGenerateIntel} genErr={intelErr} />
             ) : (
-              <div style={{ height: 'calc(100vh - 260px)', minHeight: 400 }}>
+              <div style={{ height: 'calc(100vh - 210px)', minHeight: 400 }}>
                 <EntityGraph graph={currentGraph}
                   onSelectEntity={name => { setQuery(name); setActiveTab('results') }}
                   onGenerate={generateWorkspaceIntel} generating={generatingIntel}
