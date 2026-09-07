@@ -4,7 +4,7 @@ import {
   Search, FileText, ScrollText, Network, Clock, Bookmark, X, ExternalLink,
   Copy, AlertTriangle, Users, Building2, MapPin, Wifi, WifiOff, Loader,
   Send, Filter, CheckCircle, Plus, FolderPlus, PanelRightClose, PanelRightOpen,
-  Bot, Upload, ChevronRight, FolderClosed, GripVertical, FileUp,
+  Bot, Upload, ChevronRight, FolderClosed, GripVertical, FileUp, User,
 } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1298,14 +1298,25 @@ function TabSwitcher({ active, onChange }) {
 const SEED_MSGS = [{ role: 'assistant', text: "I'm scoped to this workspace's archive. Ask me about any reporter, contract, or filing it contains — I'll cite exactly where I found it." }]
 
 function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onNewSources, onCreateWs }) {
-  const [messages, setMessages] = useState(SEED_MSGS)
+  const [messages, setMessages] = useState(() => {
+    const saved = localStorage.getItem(`chat_${sessionId}`);
+    if (saved) {
+      try { return JSON.parse(saved); } catch(e) {}
+    }
+    return SEED_MSGS;
+  })
+
+  useEffect(() => {
+    localStorage.setItem(`chat_${sessionId}`, JSON.stringify(messages));
+  }, [messages, sessionId])
+
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
   const [dragOver, setDragOver] = useState(false)
-  const bottomRef = useRef()
+  const bottomRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [messages])
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'auto' }) }, [messages])
 
   // Drop zone: accept dragged articles
   function handleDrop(e) {
@@ -1360,7 +1371,7 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
   return (
     <aside style={{
       width: 320, borderLeft: `1px solid ${C.line}`, background: C.creamDeep,
-      display: 'flex', flexDirection: 'column', height: '100%'
+      display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden'
     }}>
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1395,18 +1406,30 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
         flex: 1, overflowY: 'auto', padding: '4px 16px 16px',
         display: 'flex', flexDirection: 'column', gap: 10
       }}>
-        {messages.map((m, i) => (
+        {messages.map((m: any, i: number) => (
           <div key={i} style={{
-            fontSize: 13, lineHeight: 1.5, padding: '10px 13px',
-            borderRadius: 10, maxWidth: '92%', whiteSpace: 'pre-wrap',
-            ...(m.role === 'user'
-              ? { background: C.teal800, color: '#fff', alignSelf: 'flex-end', borderBottomRightRadius: 3 }
-              : {
-                background: '#fff', border: `1px solid ${m.error ? C.red : C.line}`,
-                color: m.error ? C.red : C.ink, alignSelf: 'flex-start', borderBottomLeftRadius: 3
-              })
+            display: 'flex', gap: 8, alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
+            maxWidth: '92%', flexDirection: m.role === 'user' ? 'row-reverse' : 'row'
           }}>
-            {m.text}
+            <div style={{
+              width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+              background: m.role === 'user' ? C.teal900 : '#fff',
+              border: `1px solid ${m.role === 'user' ? C.teal900 : C.line}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              color: m.role === 'user' ? '#fff' : C.teal900, marginTop: 4
+            }}>
+              {m.role === 'user' ? <User size={12} strokeWidth={2.5} /> : <Bot size={12} strokeWidth={2.5} />}
+            </div>
+            <div style={{
+              fontSize: 13.5, lineHeight: 1.5, padding: '10px 14px',
+              borderRadius: 12, whiteSpace: 'pre-wrap',
+              boxShadow: m.role === 'user' ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
+              ...(m.role === 'user'
+                ? { background: C.teal800, color: '#fff', borderTopRightRadius: 4 }
+                : { background: '#fff', border: `1px solid ${m.error ? C.red : C.line}`, color: m.error ? C.red : C.ink, borderTopLeftRadius: 4 })
+            }}>
+              {m.text}
+            </div>
           </div>
         ))}
         {loading && (
@@ -1425,62 +1448,97 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
       <div onDragOver={e => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)} onDrop={handleDrop}
         style={{
-          position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 6,
-          padding: 12, borderTop: `2px solid ${dragOver ? C.tan : C.line}`,
-          flexShrink: 0, transition: 'border-color .15s',
-          background: dragOver ? C.tanPale : 'transparent'
+          position: 'relative', display: 'flex', flexDirection: 'column',
+          padding: '16px 16px 24px', borderTop: `1px solid ${C.line}`,
+          flexShrink: 0, transition: 'background .15s',
+          background: dragOver ? C.tanPale : '#fff',
+          boxShadow: '0 -4px 16px rgba(0,0,0,0.02)',
+          zIndex: 10
         }}>
         {dragOver && (
           <div style={{
             position: 'absolute', inset: 0, display: 'flex', alignItems: 'center',
-            justifyContent: 'center', pointerEvents: 'none', fontSize: 12.5, color: C.tanDeep,
-            fontWeight: 600, gap: 6
+            justifyContent: 'center', pointerEvents: 'none', fontSize: 13, color: C.teal900,
+            fontWeight: 600, gap: 6, background: 'rgba(241, 239, 230, 0.9)', zIndex: 5,
+            backdropFilter: 'blur(2px)'
           }}>
             <GripVertical size={14} /> Drop article here
           </div>
         )}
+        
         {menuOpen && (
           <div style={{
-            position: 'absolute', bottom: 56, left: 12, background: '#fff',
-            border: `1px solid ${C.line}`, borderRadius: 10,
-            boxShadow: '0 8px 24px rgba(0,61,66,.16)', padding: 6,
+            position: 'absolute', bottom: 76, left: 16, background: '#fff',
+            border: `1px solid ${C.line}`, borderRadius: 12,
+            boxShadow: '0 12px 32px rgba(0,61,66,.12)', padding: 6,
             display: 'flex', flexDirection: 'column', gap: 2, width: 170, zIndex: 10
           }}>
             <button onClick={() => { onCreateWs('New Workspace'); setMenuOpen(false) }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8, textAlign: 'left',
-                padding: '8px 9px', borderRadius: 6, background: 'transparent', border: 'none',
-                fontSize: 12.5, color: C.ink, cursor: 'pointer'
-              }}>
-              <FolderPlus size={14} /> New workspace
+                padding: '10px 10px', borderRadius: 8, background: 'transparent', border: 'none',
+                fontSize: 13, fontWeight: 500, color: C.ink, cursor: 'pointer'
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = C.tanPale}
+              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+            >
+              <FolderPlus size={15} /> New workspace
             </button>
           </div>
         )}
-        <button onClick={() => setMenuOpen(v => !v)}
-          style={{
-            width: 30, height: 30, borderRadius: '50%', border: `1px solid ${C.lineStrong}`,
-            background: '#fff', color: C.teal800, display: 'flex', alignItems: 'center',
-            justifyContent: 'center', cursor: 'pointer', flexShrink: 0
-          }}>
-          <Plus size={16} strokeWidth={2.25} />
-        </button>
-        <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={1}
-          placeholder="Ask about this workspace… or drag an article here"
-          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
-          style={{
-            flex: 1, resize: 'none', border: `1px solid ${C.line}`, borderRadius: 10,
-            background: '#fff', padding: '8px 10px', fontSize: 13, outline: 'none',
-            maxHeight: 90, lineHeight: 1.4, fontFamily: 'inherit'
-          }} />
-        <button onClick={send} disabled={loading || !draft.trim()}
-          style={{
-            width: 30, height: 30, borderRadius: '50%', background: C.teal800, border: 'none',
-            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
-            cursor: loading || !draft.trim() ? 'not-allowed' : 'pointer', flexShrink: 0,
-            opacity: loading || !draft.trim() ? .5 : 1
-          }}>
-          {loading ? <Loader size={14} className="spin" /> : <Send size={15} strokeWidth={2.25} />}
-        </button>
+
+        {/* Input Pill Container */}
+        <div style={{
+          display: 'flex', alignItems: 'flex-end', background: '#F9F8F5',
+          border: `1px solid ${C.lineStrong}`, borderRadius: 24,
+          padding: '4px 6px', gap: 8, transition: 'border-color 0.2s',
+          boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.02)'
+        }}>
+          {/* Plus Menu Button */}
+          <button onClick={() => setMenuOpen(v => !v)}
+            style={{
+              width: 32, height: 32, borderRadius: '50%', border: 'none',
+              background: menuOpen ? C.tanPale : 'transparent', color: C.teal800,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: 'pointer', flexShrink: 0, marginBottom: 2,
+              transition: 'background 0.2s'
+            }}
+            onMouseEnter={e => !menuOpen && (e.currentTarget.style.background = 'rgba(0,0,0,0.04)')}
+            onMouseLeave={e => !menuOpen && (e.currentTarget.style.background = 'transparent')}
+          >
+            <Plus size={18} strokeWidth={2.5} />
+          </button>
+
+          {/* Text Area */}
+          <textarea value={draft} onChange={e => setDraft(e.target.value)} rows={1}
+            placeholder="Ask about this workspace..."
+            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
+            style={{
+              flex: 1, resize: 'none', border: 'none', background: 'transparent',
+              padding: '10px 0px', fontSize: 13.5, outline: 'none',
+              maxHeight: 120, lineHeight: 1.5, fontFamily: 'inherit',
+              color: C.ink, alignSelf: 'center', minHeight: 40
+            }} />
+            
+          {/* Send Button */}
+          <button onClick={send} disabled={loading || !draft.trim()}
+            style={{
+              width: 34, height: 34, borderRadius: '50%',
+              background: loading || !draft.trim() ? C.lineStrong : C.teal800, 
+              border: 'none', color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              cursor: loading || !draft.trim() ? 'not-allowed' : 'pointer', 
+              flexShrink: 0, marginBottom: 1,
+              transition: 'background 0.2s, transform 0.1s',
+              transform: draft.trim() && !loading ? 'scale(1.05)' : 'scale(1)'
+            }}>
+            {loading ? <Loader size={15} className="spin" /> : <Send size={15} strokeWidth={2.5} style={{ marginLeft: -1, marginTop: 1 }} />}
+          </button>
+        </div>
+        
+        <div style={{ textAlign: 'center', fontSize: 11, color: C.inkSoft, marginTop: 10, opacity: 0.8 }}>
+          Press <strong style={{fontWeight:600}}>Enter</strong> to search
+        </div>
       </div>
     </aside>
   )
@@ -1491,11 +1549,17 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
 // ─────────────────────────────────────────────────────────────────────────────
 export default function App() {
   // Backend
-  const [apiUrl, setApiUrl] = useState('https://your-ngrok-url.ngrok-free.app')
+  const [apiUrl, setApiUrl] = useState('https://0cf5-136-108-84-252.ngrok-free.app')
   const [connected, setConnected] = useState(null)
   const [checking, setChecking] = useState(false)
   const [api, setApi] = useState(null)
-  const sessionId = useRef('newsroom_' + Date.now())
+  const [sessionId] = useState(() => {
+    const saved = localStorage.getItem('newsroom_sessionId');
+    if (saved) return saved;
+    const newId = 'newsroom_' + Date.now();
+    localStorage.setItem('newsroom_sessionId', newId);
+    return newId;
+  })
 
   // Workspaces
   const [workspaces, setWorkspaces] = useState(SEED_WORKSPACES)
@@ -1924,7 +1988,7 @@ export default function App() {
         </main>
 
         <ChatSidebar collapsed={chatCollapsed} onToggle={() => setChatCollapsed(v => !v)}
-          activeWorkspace={activeWs} api={api} sessionId={sessionId.current}
+          activeWorkspace={activeWs} api={api} sessionId={sessionId}
           onNewSources={handleChatSources} onCreateWs={createWorkspace} />
       </div>
 
