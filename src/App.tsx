@@ -1,5 +1,8 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { createPortal } from 'react-dom'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkBreaks from 'remark-breaks'
 import {
   Search, FileText, ScrollText, Network, Clock, Bookmark, X, ExternalLink,
   Copy, AlertTriangle, Users, Building2, MapPin, Wifi, WifiOff, Loader,
@@ -749,9 +752,10 @@ function SourceDrawer({ article, onClose }) {
 // TIMELINE (inline - uses articles directly)
 // ─────────────────────────────────────────────────────────────────────────────
 function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genErr }) {
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
   const sorted = [...articles]
     .filter(a => a.date && a.date !== '1970-01-01')
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()) // sort newest first
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) // ascending order (oldest first)
 
   if (sorted.length === 0) return (
     <div style={{ maxWidth: 420, padding: '60px 32px', textAlign: 'center', margin: '0 auto' }}>
@@ -777,11 +781,36 @@ function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genEr
     </div>
   )
 
+  const scrollRef = useRef<HTMLDivElement>(null)
+  
+  // Extract unique years for jump-to dropdown
+  const uniqueYears = Array.from(new Set(sorted.map(a => new Date(a.date).getFullYear()))).sort()
+
+  function handleJump(e: React.ChangeEvent<HTMLSelectElement>) {
+    const year = e.target.value
+    if (!year) return
+    const index = sorted.findIndex(a => new Date(a.date).getFullYear() === parseInt(year))
+    if (index !== -1 && scrollRef.current) {
+      scrollRef.current.scrollTo({ left: index * 320, behavior: 'smooth' })
+    }
+  }
+
   return (
-    <div style={{ minHeight: 'calc(100vh - 230px)', padding: '40px 64px 160px', background: '#F9F8F5' }}>
-      <div style={{ maxWidth: 860, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 32 }}>
-        <div style={{ fontSize: 12.5, color: C.inkSoft, ...mono }}>
-          {sorted.length} entries · newest first
+    <div style={{ height: '100%', minHeight: 560, display: 'flex', flexDirection: 'column', background: '#F9F8F5' }}>
+      <div style={{ padding: '24px 32px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ fontSize: 12.5, color: C.inkSoft, ...mono }}>
+            {sorted.length} entries · chronological order
+          </div>
+          {uniqueYears.length > 0 && (
+            <select onChange={handleJump} defaultValue="" style={{
+              background: '#fff', border: `1px solid ${C.lineStrong}`, borderRadius: 6,
+              padding: '4px 8px', fontSize: 12, color: C.ink, outline: 'none', cursor: 'pointer', ...mono
+            }}>
+              <option value="" disabled>Jump to year…</option>
+              {uniqueYears.map(y => <option key={y} value={y}>{y}</option>)}
+            </select>
+          )}
         </div>
         {onGenerate && (
           <button onClick={onGenerate} disabled={generating || !canGenerate}
@@ -798,64 +827,73 @@ function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genEr
         )}
       </div>
 
-      <div style={{ position: 'relative', maxWidth: 860, margin: '0 auto' }}>
-        {/* Vertical Track Line */}
-        <div style={{
-          position: 'absolute', top: 12, bottom: 24, left: 21, width: 2,
-          background: C.lineStrong, borderRadius: 2
-        }} />
+      <div ref={scrollRef} className="scroll-thin" style={{ flex: 1, overflowX: 'auto', overflowY: 'auto', padding: '0 32px', scrollBehavior: 'smooth' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', position: 'relative', height: '100%', minHeight: 480, padding: '0 20px' }}>
+          
+          {/* Continuous Track Line */}
+          <div style={{
+            position: 'absolute', left: 0, right: 0, top: '50%', height: 2,
+            background: C.lineStrong, transform: 'translateY(-50%)', zIndex: 0
+          }} />
 
-        {sorted.map((a, i) => (
-          <div key={a.id + i} style={{
-            position: 'relative', display: 'flex', gap: 24, paddingBottom: i === sorted.length - 1 ? 0 : 36
-          }}>
-            {/* Dot */}
-            <div style={{
-              width: 14, height: 14, borderRadius: '50%', background: '#fff',
-              border: `3px solid ${C.teal800}`, position: 'relative', zIndex: 2,
-              marginTop: 22, marginLeft: 15, flexShrink: 0
-            }} />
-            
-            {/* Content Card */}
-            <button onClick={() => { if (a.pdfUrl) openPdf(a.pdfUrl); else onOpen(a) }}
-              style={{
-                flex: 1, background: '#fff', border: `1px solid ${C.line}`,
-                borderRadius: 14, padding: '18px 22px', textAlign: 'left',
-                cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8,
-                boxShadow: '0 4px 12px rgba(0,0,0,0.03)', transition: 'all .2s ease-out'
+          {sorted.map((a, i) => {
+            const up = i % 2 === 0
+            const active = hoveredId === a.id
+            return (
+              <div key={a.id + i} style={{ 
+                width: 320, height: 2, position: 'relative', display: 'flex', justifyContent: 'center', zIndex: active ? 10 : 1 
               }}
-              onMouseEnter={e => {
-                e.currentTarget.style.boxShadow = '0 8px 24px rgba(0,61,66,.1)';
-                e.currentTarget.style.borderColor = C.tan;
-                e.currentTarget.style.transform = 'translateY(-2px)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.03)';
-                e.currentTarget.style.borderColor = C.line;
-                e.currentTarget.style.transform = 'translateY(0)';
-              }}>
-              <div style={{ ...mono, fontSize: 11.5, color: C.inkSoft }}>
-                {formatDate(a.date)}
-              </div>
-              <div style={{
-                ...serif, fontSize: 18, fontWeight: 600, color: C.teal900,
-                lineHeight: 1.4
-              }}>
-                {a.title}
-              </div>
-              {a.excerpt && (
+                onMouseEnter={() => setHoveredId(a.id)} onMouseLeave={() => setHoveredId(null)}>
+                
+                {/* Connecting stem */}
                 <div style={{
-                  fontSize: 14.5, color: C.ink, lineHeight: 1.6,
-                  display: '-webkit-box', WebkitLineClamp: 4,
-                  WebkitBoxOrient: 'vertical', overflow: 'hidden', marginTop: 6,
-                  opacity: 0.9
-                }}>
-                  {a.excerpt}
-                </div>
-              )}
-            </button>
-          </div>
-        ))}
+                  position: 'absolute', left: '50%', transform: 'translateX(-50%)',
+                  width: 2, background: active ? C.tan : C.lineStrong,
+                  height: 60, ...(up ? { bottom: 0 } : { top: 0 }),
+                  transition: 'background .15s'
+                }} />
+
+                {/* Dot */}
+                <div style={{
+                  width: 14, height: 14, borderRadius: '50%', border: `3px solid ${active ? C.tan : C.teal800}`,
+                  background: '#fff', position: 'absolute', left: '50%', top: '50%',
+                  transform: 'translate(-50%, -50%)', zIndex: 2, transition: 'border-color .15s'
+                }} />
+
+                {/* Card */}
+                <button onClick={() => { if (a.pdfUrl) openPdf(a.pdfUrl); else onOpen(a) }}
+                  style={{
+                    position: 'absolute', left: '50%',
+                    ...(up ? { bottom: 60, transform: 'translateX(-50%)' } : { top: 60, transform: 'translateX(-50%)' }),
+                    background: '#fff', border: `1px solid ${active ? C.tan : C.line}`,
+                    borderRadius: 14, padding: '16px 20px', cursor: 'pointer',
+                    boxShadow: active ? '0 12px 32px rgba(0,61,66,.12)' : '0 4px 12px rgba(0,0,0,0.04)',
+                    width: 280, textAlign: 'left', transition: 'all .2s ease-out'
+                  }}>
+                  <div style={{ ...mono, fontSize: 11, color: C.inkSoft, marginBottom: 6 }}>
+                    {formatDate(a.date)}
+                  </div>
+                  <div style={{
+                    ...serif, fontSize: 17, fontWeight: 600, color: C.teal900,
+                    lineHeight: 1.3, marginBottom: 8,
+                    display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden'
+                  }}>{a.title}</div>
+                  
+                  {a.excerpt && (
+                    <div style={{
+                      fontSize: 13.5, color: C.ink, lineHeight: 1.5,
+                      display: '-webkit-box', WebkitLineClamp: 4,
+                      WebkitBoxOrient: 'vertical', overflow: 'hidden',
+                      opacity: 0.9
+                    }}>
+                      {a.excerpt}
+                    </div>
+                  )}
+                </button>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )
@@ -1388,9 +1426,9 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
       if (res.sources?.length) {
         const cites = res.sources.slice(0, 4).map((s, i) => {
           const dm = s.doc_meta || {}
-          return `[${i + 1}] ${dm.title || s.filename || 'Document'} · p.${s.page_number ?? '?'}`
+          return `- **[${i + 1}]** ${dm.title || s.filename || 'Document'} (p. ${s.page_number ?? '?'})`
         }).join('\n')
-        reply += `\n\nSources:\n${cites}`
+        reply += `\n\n**Sources:**\n${cites}`
       }
       setMessages(m => [...m, { role: 'assistant', text: reply }])
     } catch (err) {
@@ -1415,6 +1453,19 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
       width: 320, borderLeft: `1px solid ${C.line}`, background: C.creamDeep,
       display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, overflow: 'hidden'
     }}>
+      <style>{`
+        .markdown-body { font-size: 13.5px; line-height: 1.5; color: inherit; }
+        .markdown-body p { margin-top: 0; margin-bottom: 8px; }
+        .markdown-body p:last-child { margin-bottom: 0; }
+        .markdown-body strong { font-weight: 600; color: #003033; }
+        .markdown-body ul, .markdown-body ol { margin: 8px 0 8px 20px; padding: 0; }
+        .markdown-body li { margin-bottom: 4px; }
+        .markdown-body a { color: #B19470; text-decoration: none; font-weight: 500; }
+        .markdown-body a:hover { text-decoration: underline; }
+        .markdown-body table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
+        .markdown-body th, .markdown-body td { border: 1px solid #D4CCC0; padding: 6px 10px; text-align: left; }
+        .markdown-body th { background: rgba(0,0,0,0.03); font-weight: 600; color: #003033; }
+      `}</style>
       <header style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '16px 16px 12px', flexShrink: 0
@@ -1464,13 +1515,18 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
             </div>
             <div style={{
               fontSize: 13.5, lineHeight: 1.5, padding: '10px 14px',
-              borderRadius: 12, whiteSpace: 'pre-wrap',
+              borderRadius: 12, minWidth: 0, overflowX: 'auto',
+              whiteSpace: m.role === 'user' ? 'pre-wrap' : 'normal',
               boxShadow: m.role === 'user' ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
               ...(m.role === 'user'
                 ? { background: C.teal800, color: '#fff', borderTopRightRadius: 4 }
                 : { background: '#fff', border: `1px solid ${m.error ? C.red : C.line}`, color: m.error ? C.red : C.ink, borderTopLeftRadius: 4 })
             }}>
-              {m.text}
+              {m.role === 'user' ? m.text : (
+                <div className="markdown-body" style={{ color: 'inherit' }}>
+                  <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{m.text}</Markdown>
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -1928,7 +1984,7 @@ export default function App() {
           )}
 
           {/* Content */}
-          <div className="scroll-thin" style={{ flex: 1, overflowY: 'auto', padding: activeTab === 'results' ? '20px 32px 160px' : 0 }}>
+          <div className="scroll-thin" style={{ flex: 1, overflowY: 'auto', padding: activeTab === 'results' ? '20px 32px 24px' : '0' }}>
             {searching ? (
               <div style={{ maxWidth: 420, padding: '60px 0', textAlign: 'center' }}>
                 <p style={{
@@ -1964,7 +2020,7 @@ export default function App() {
                 onGenerate={generateWorkspaceIntel} generating={generatingIntel}
                 canGenerate={canGenerateIntel} genErr={intelErr} />
             ) : (
-              <div style={{ height: 'calc(100vh - 210px)', minHeight: 400 }}>
+              <div style={{ height: '100%', minHeight: 560 }}>
                 <EntityGraph graph={currentGraph}
                   onSelectEntity={name => { setQuery(name); setActiveTab('results') }}
                   onGenerate={generateWorkspaceIntel} generating={generatingIntel}
@@ -1973,12 +2029,12 @@ export default function App() {
             )}
           </div>
 
-          {/* Floating search bar */}
+          {/* Fixed search bar at bottom (no overlap) */}
           <div style={{
-            position: 'absolute', bottom: 24, left: 24, right: 24,
+            margin: '0 24px 24px', flexShrink: 0,
             background: '#fff', borderRadius: 14, border: `1px solid ${C.line}`,
             boxShadow: '0 8px 24px rgba(0,61,66,.16)', overflow: 'hidden',
-            display: 'flex', flexDirection: 'column'
+            display: 'flex', flexDirection: 'column', zIndex: 10
           }}>
             {/* Feature 4.2: Search Scope Toggle */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 18px 0', background: C.creamDeep }}>
