@@ -37,7 +37,10 @@ function makeApi(base) {
   const j = r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() }
   return {
     health: () => fetch(url('/health'), { headers: { "ngrok-skip-browser-warning": "true" } }).then(j),
-    search: (q, k, ids) => fetch(url('/search'), { method: 'POST', headers: { 'Content-Type': 'application/json', "ngrok-skip-browser-warning": "true" }, body: JSON.stringify({ query: q, k: k || 10, doc_ids: ids || [] }) }).then(j),
+    search: (q, k, ids) => fetch(url('/hybrid_search'), { method: 'POST', headers: { 'Content-Type': 'application/json', "ngrok-skip-browser-warning": "true" }, body: JSON.stringify({ query: q, k: k || 10, doc_ids: ids || [] }) }).then(j),
+    decompose: (q) => fetch(url('/decompose'), { method: 'POST', headers: { 'Content-Type': 'application/json', "ngrok-skip-browser-warning": "true" }, body: JSON.stringify({ query: q }) }).then(j),
+    factcheck: (claim, context) => fetch(url('/factcheck'), { method: 'POST', headers: { 'Content-Type': 'application/json', "ngrok-skip-browser-warning": "true" }, body: JSON.stringify({ claim, k: 3 }) }).then(j),
+    investigate: (topic) => fetch(url('/investigate'), { method: 'POST', headers: { 'Content-Type': 'application/json', "ngrok-skip-browser-warning": "true" }, body: JSON.stringify({ entity: topic, k: 5 }) }).then(j),
     chat: (msg, sid) => fetch(url('/chat'), { method: 'POST', headers: { 'Content-Type': 'application/json', "ngrok-skip-browser-warning": "true" }, body: JSON.stringify({ message: msg, session_id: sid }) }).then(j),
     listDocuments: () => fetch(url('/documents'), { headers: { "ngrok-skip-browser-warning": "true" } }).then(j),
     workspace: (ids) => fetch(url('/workspace'), { method: 'POST', headers: { 'Content-Type': 'application/json', "ngrok-skip-browser-warning": "true" }, body: JSON.stringify({ doc_ids: ids }) }).then(j),
@@ -143,21 +146,25 @@ function buildEntityGraph(nodes) {
 // ─────────────────────────────────────────────────────────────────────────────
 function uid() { return Math.random().toString(36).slice(2) }
 
+let _setGlobalPdfUrl = null;
 function openPdf(url) {
   if (!url || url === '#') return
-  const base = CURRENT_API_BASE || 'https://0cf5-136-108-84-252.ngrok-free.app';
+  const base = CURRENT_API_BASE || 'https://3667-34-75-104-99.ngrok-free.app';
   const full = /^https?:\/\//i.test(url)
     ? url
-    : `${base}${url.startsWith('/') ? '' : '/'}${url}`
+    : `${base}${url.startsWith('/') ? '' : '/'}${url}`;
     
-  // Create an anchor tag to ensure browser popup blockers don't block window.open in iframes
-  const a = document.createElement('a');
-  a.href = full;
-  a.target = '_blank';
-  a.rel = 'noopener noreferrer';
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  if (_setGlobalPdfUrl) {
+    _setGlobalPdfUrl(full);
+  } else {
+    const a = document.createElement('a');
+    a.href = full;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
 }
 
 const WS_COLORS = ['#004B50', '#B19470', '#5C7C7A', '#9A4B3C', '#2E7D32', '#7B5EA7']
@@ -227,6 +234,13 @@ function NgrokBar({ apiUrl, setApiUrl, connected, checking, onCheck }) {
         </span>}
       {connected === true && !checking &&
         <span style={{ ...mono, fontSize: 10.5, color: '#2E7D32' }}>Archive live</span>}
+      <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, alignItems: 'center' }}>
+        <span style={{ fontSize: 11.5, color: C.inkSoft, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span style={{ padding: '2px 6px', background: 'rgba(0,0,0,0.06)', borderRadius: 4, ...mono, fontSize: 10.5, color: C.ink }}>⌘K</span> 
+          Focus search
+        </span>
+      </div>
+
     </div>
   )
 }
@@ -237,8 +251,7 @@ function NgrokBar({ apiUrl, setApiUrl, connected, checking, onCheck }) {
 function LeftPanel({
   workspaces, activeWsId, onSelectWs, onCreateWs,
   onOpenFileManager, backendDocs, api, onIngestDone,
-  // drag-drop into workspace
-  onDropArticleToWs,
+  onDropArticleToWs, searchHistory = [], onHistoryClick
 }) {
   const [creating, setCreating] = useState(false)
   const [draftName, setDraftName] = useState('')
@@ -362,6 +375,36 @@ function LeftPanel({
           )}
         </div>
       </div>
+
+
+      {/* ── SEARCH HISTORY section ── */}
+      {searchHistory.length > 0 && (
+        <div style={{
+          display: 'flex', flexDirection: 'column', flexShrink: 0,
+          borderBottom: `1px solid ${C.line}`, maxHeight: '25%', minHeight: 80, overflow: 'hidden'
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '12px 14px 8px', flexShrink: 0
+          }}>
+            <span style={s.eyebrow}>Search History</span>
+          </div>
+          <div className="scroll-thin" style={{ overflowY: 'auto', flex: 1, padding: '0 8px 10px' }}>
+            {searchHistory.map((h, i) => (
+              <button key={i} onClick={() => onHistoryClick(h)}
+                className="fm-row"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left',
+                  background: 'transparent', border: 'none', borderRadius: 6, padding: '6px 8px',
+                  cursor: 'pointer', color: C.inkSoft, fontSize: 12, transition: 'all .1s'
+                }}>
+                <Search size={12} style={{ flexShrink: 0, opacity: 0.6 }} />
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── ARCHIVE section — independently scrollable ── */}
       <div style={{ display: 'flex', flexDirection: 'column', flex: 1, overflow: 'hidden' }}>
@@ -629,7 +672,47 @@ function ResultCard({ article, onOpen, inWorkspace, onAddToWorkspace, workspaces
 // ─────────────────────────────────────────────────────────────────────────────
 // SOURCE DRAWER
 // ─────────────────────────────────────────────────────────────────────────────
-function SourceDrawer({ article, onClose }) {
+function SourceDrawer({ article, onClose, api }) {
+  const [fcClaim, setFcClaim] = useState('');
+  const [fcResult, setFcResult] = useState(null);
+  const [fcLoading, setFcLoading] = useState(false);
+  const [showFc, setShowFc] = useState(false);
+  const [fcSuggestions, setFcSuggestions] = useState([]);
+  const [fcSuggestLoading, setFcSuggestLoading] = useState(false);
+
+  async function handleSuggestClaims() {
+    if (!api || !api.decompose) return;
+    setFcSuggestLoading(true);
+    try {
+      const res = await api.decompose("Extract main claims to verify from: " + article.title);
+      const qs = res.questions || res.queries || res.follow_ups || res.sub_questions;
+      if (Array.isArray(qs)) setFcSuggestions(qs);
+      else if (typeof qs === 'string') setFcSuggestions(qs.split('\n').filter(Boolean));
+    } catch(e) {}
+    finally { setFcSuggestLoading(false); }
+  }
+
+  async function handleFactCheck() {
+    if (!fcClaim.trim() || !api) return;
+    setFcLoading(true);
+    setFcResult(null);
+    try {
+      const res = await api.factcheck(fcClaim, article.fullText || article.excerpt);
+      
+      if (res.status && res.reasoning) {
+        setFcResult(res.status + '\n\n' + res.reasoning);
+      } else {
+        const out = res.result || res.reply || res.status || 'Verified.'; 
+        setFcResult(typeof out === 'string' ? out : JSON.stringify(res));
+      }
+
+    } catch (err) {
+      setFcResult(`Error: ${err.message}`);
+    } finally {
+      setFcLoading(false);
+    }
+  }
+
   if (!article) return null
   return (
     <div onClick={onClose}
@@ -707,11 +790,61 @@ function SourceDrawer({ article, onClose }) {
           )}
         </div>
 
-        {/* Footer actions */}
+
+          {/* Fact Check Section */}
+          {showFc && (
+            <div style={{ marginTop: 32, padding: 20, background: '#F5FDF7', border: '1px solid #4CAF50', borderRadius: 12 }}>
+              <h3 style={{ margin: '0 0 12px', fontSize: 14, color: '#2E7D32', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <CheckCircle size={16} /> Fact-Check Claim against this Document
+              </h3>
+              <textarea 
+                value={fcClaim} onChange={e => setFcClaim(e.target.value)}
+                placeholder="Enter a claim to verify..."
+                style={{ width: '100%', height: 60, padding: 10, borderRadius: 8, border: '1px solid #A5D6A7', fontSize: 13, resize: 'none', marginBottom: 10, outlineColor: '#4CAF50' }}
+              />
+              
+              <div style={{ marginBottom: 12 }}>
+                <button onClick={handleSuggestClaims} disabled={fcSuggestLoading} style={{
+                  background: 'none', border: 'none', color: '#2E7D32', fontSize: 12, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, padding: 0
+                }}>
+                  {fcSuggestLoading ? <Loader size={12} className="spin"/> : <Network size={12} />} Suggest Claims to Check
+                </button>
+                {fcSuggestions.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                    {fcSuggestions.map((s, i) => (
+                      <button key={i} onClick={() => setFcClaim(s)} style={{
+                        background: '#E8F5E9', border: '1px solid #A5D6A7', color: '#2E7D32', padding: '4px 8px', borderRadius: 12, fontSize: 11, cursor: 'pointer', textAlign: 'left'
+                      }}>{s}</button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button onClick={handleFactCheck} disabled={fcLoading || !fcClaim.trim()} style={{
+                background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 16px', fontSize: 13, fontWeight: 'bold', cursor: fcLoading || !fcClaim.trim() ? 'not-allowed' : 'pointer',
+                display: 'flex', alignItems: 'center', gap: 6, opacity: fcLoading || !fcClaim.trim() ? 0.6 : 1
+              }}>
+                {fcLoading ? <Loader size={14} className="spin" /> : <Search size={14} />} Verify Claim
+              </button>
+              
+              {fcResult && (
+                <div style={{ marginTop: 16, padding: 12, background: '#fff', borderRadius: 8, border: '1px solid #C8E6C9', fontSize: 13.5, lineHeight: 1.5 }}>
+                  <div className="markdown-body"><Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{fcResult}</Markdown></div>
+                </div>
+              )}
+            </div>
+          )}
+
         <div style={{
           borderTop: `1px solid ${C.line}`, padding: '12px 20px',
           display: 'flex', gap: 10, flexShrink: 0
         }}>
+
+          <button onClick={() => setShowFc(!showFc)} style={{
+            flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, padding: '10px 0',
+            background: showFc ? '#E8F5E9' : '#4CAF50', color: showFc ? '#2E7D32' : '#fff', border: showFc ? '1px solid #4CAF50' : 'none', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer'
+          }}>
+            <CheckCircle size={14} /> Fact Check
+          </button>
           {article.pdfUrl ? (
             <button onClick={() => openPdf(article.pdfUrl)}
               style={{
@@ -753,6 +886,8 @@ function SourceDrawer({ article, onClose }) {
 // ─────────────────────────────────────────────────────────────────────────────
 function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genErr }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  
   const sorted = [...articles]
     .filter(a => a.date && a.date !== '1970-01-01')
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()) // ascending order (oldest first)
@@ -780,8 +915,6 @@ function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genEr
       {genErr && <p style={{ fontSize: 12, color: C.red, marginTop: 10 }}>{genErr}</p>}
     </div>
   )
-
-  const scrollRef = useRef<HTMLDivElement>(null)
   
   // Extract unique years for jump-to dropdown
   const uniqueYears = Array.from(new Set(sorted.map(a => new Date(a.date).getFullYear()))).sort()
@@ -1127,6 +1260,8 @@ function EntityGraph({ graph, onSelectEntity, onGenerate, generating, canGenerat
 function FileManager({ workspaces, getArticles, backendDocs, onClose, onOpenArticle }) {
   const [activeId, setActiveId] = useState('__archive__')
   const [query, setQuery] = useState('')
+
+
   const [selected, setSelected] = useState(new Set())
 
   const isArchive = activeId === '__archive__'
@@ -1374,17 +1509,7 @@ function TabSwitcher({ active, onChange }) {
 const SEED_MSGS = [{ role: 'assistant', text: "I'm scoped to this workspace's archive. Ask me about any reporter, contract, or filing it contains — I'll cite exactly where I found it." }]
 
 function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onNewSources, onCreateWs }) {
-  const [messages, setMessages] = useState(() => {
-    const saved = localStorage.getItem(`chat_${sessionId}`);
-    if (saved) {
-      try { return JSON.parse(saved); } catch(e) {}
-    }
-    return SEED_MSGS;
-  })
-
-  useEffect(() => {
-    localStorage.setItem(`chat_${sessionId}`, JSON.stringify(messages));
-  }, [messages, sessionId])
+  const [messages, setMessages] = useState(SEED_MSGS)
 
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
@@ -1409,28 +1534,65 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
     } catch { }
   }
 
-  async function send() {
-    const text = draft.trim()
+
+  const [followUps, setFollowUps] = useState([]);
+  const [decomposing, setDecomposing] = useState(false);
+  const [investigating, setInvestigating] = useState(false);
+  const [investigationResult, setInvestigationResult] = useState(null);
+
+  async function getFollowUps(topic) {
+    if (!api || !api.decompose) return;
+    setDecomposing(true);
+    try {
+      const res = await api.decompose(topic);
+      const qs = res.questions || res.queries || res.follow_ups;
+      if (Array.isArray(qs)) { setFollowUps(qs); } 
+      else if (typeof qs === 'string') { setFollowUps(qs.split('\n').map(s=>s.trim()).filter(Boolean)); }
+      else if (res.sub_questions) { setFollowUps(res.sub_questions); }
+    } catch(e) { console.error(e); }
+    finally { setDecomposing(false); }
+  }
+
+  async function handleInvestigate() {
+    if (!api || !api.investigate) return;
+    const lastUserMsg = messages.filter(m => m.role === 'user').pop();
+    const topic = lastUserMsg ? lastUserMsg.text : 'recent topics';
+    setInvestigating(true);
+    try {
+      const res = await api.investigate(topic);
+      const out = res.result || res.reply; setInvestigationResult(typeof out === 'string' ? out : JSON.stringify(res));
+    } catch (err) {
+      setInvestigationResult(`Investigation failed: ${err.message}`);
+    } finally {
+      setInvestigating(false);
+    }
+  }
+
+  async function send(overrideText) {
+    const isStr = typeof overrideText === 'string'
+    const text = (isStr ? overrideText : draft).trim()
     if (!text || loading) return
     setDraft('')
-    setMessages(m => [...m, { role: 'user', text }])
+    setFollowUps([])
+    setMessages([{ role: 'user', text }])
     if (!api) {
       setMessages(m => [...m, { role: 'assistant', text: 'Connect the backend (paste your ngrok URL above) before searching the archive.' }])
       return
     }
     setLoading(true)
     try {
-      const res = await api.chat(text, sessionId)
+      const res = await api.chat(text, Date.now().toString())
       if (res.sources?.length) onNewSources?.(res.sources)
       let reply = res.reply || 'No response from archive.'
       if (res.sources?.length) {
         const cites = res.sources.slice(0, 4).map((s, i) => {
           const dm = s.doc_meta || {}
-          return `- **[${i + 1}]** ${dm.title || s.filename || 'Document'} (p. ${s.page_number ?? '?'})`
-        }).join('\n')
-        reply += `\n\n**Sources:**\n${cites}`
+          return `> **[${i + 1}]** ${dm.title || s.filename || 'Document'} (p. ${s.page_number ?? '?'})`
+        }).join('\n>\n')
+        reply += `\n\n---\n**Sources:**\n${cites}`
       }
       setMessages(m => [...m, { role: 'assistant', text: reply }])
+      getFollowUps(text) // Trigger decompose on the user's question
     } catch (err) {
       setMessages(m => [...m, { role: 'assistant', text: `⚠ ${err.message}`, error: true }])
     } finally { setLoading(false) }
@@ -1462,6 +1624,7 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
         .markdown-body li { margin-bottom: 4px; }
         .markdown-body a { color: #B19470; text-decoration: none; font-weight: 500; }
         .markdown-body a:hover { text-decoration: underline; }
+        .markdown-body blockquote { margin: 12px 0; padding-left: 12px; border-left: 3px solid #C9C3B2; color: #5C7C7A; font-style: italic; }
         .markdown-body table { display: block; max-width: 100%; overflow-x: auto; white-space: nowrap; border-collapse: collapse; margin: 12px 0; font-size: 12px; }
         .markdown-body th, .markdown-body td { border: 1px solid #D4CCC0; padding: 6px 10px; text-align: left; }
         .markdown-body th { background: rgba(0,0,0,0.03); font-weight: 600; color: #003033; }
@@ -1484,6 +1647,18 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
           <PanelRightClose size={17} strokeWidth={2} />
         </button>
       </header>
+      {/* Big Red Investigate Button */}
+      <div style={{ padding: '0 16px 12px', borderBottom: `1px solid ${C.line}` }}>
+         <button onClick={handleInvestigate} disabled={investigating} style={{
+           width: '100%', background: '#D32F2F', color: '#fff', border: 'none', borderRadius: 8, padding: '10px',
+           fontSize: 13, fontWeight: 'bold', cursor: investigating ? 'not-allowed' : 'pointer',
+           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+           boxShadow: '0 4px 12px rgba(211, 47, 47, 0.25)', transition: 'background 0.2s'
+         }}>
+           {investigating ? <Loader size={15} className="spin" /> : <Search size={15} />}
+           {investigating ? 'Investigating...' : 'Investigate Context'}
+         </button>
+      </div>
 
       {activeWorkspace && (
         <div style={{
@@ -1515,12 +1690,15 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
             </div>
             <div style={{
               fontSize: 13.5, lineHeight: 1.5, padding: '10px 14px',
-              borderRadius: 12, minWidth: 0, overflowX: 'auto',
+              borderBottomLeftRadius: 12, borderBottomRightRadius: 12,
+              borderTopLeftRadius: m.role === 'user' ? 12 : 4,
+              borderTopRightRadius: m.role === 'user' ? 4 : 12,
+              minWidth: 0, overflowX: 'auto',
               whiteSpace: m.role === 'user' ? 'pre-wrap' : 'normal',
               boxShadow: m.role === 'user' ? 'none' : '0 1px 3px rgba(0,0,0,0.04)',
               ...(m.role === 'user'
-                ? { background: C.teal800, color: '#fff', borderTopRightRadius: 4 }
-                : { background: '#fff', border: `1px solid ${m.error ? C.red : C.line}`, color: m.error ? C.red : C.ink, borderTopLeftRadius: 4 })
+                ? { background: C.teal800, color: '#fff' }
+                : { background: '#fff', border: `1px solid ${m.error ? C.red : C.line}`, color: m.error ? C.red : C.ink })
             }}>
               {m.role === 'user' ? m.text : (
                 <div className="markdown-body" style={{ color: 'inherit' }}>
@@ -1539,10 +1717,54 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
             <Loader size={13} className="spin" /> Searching archive…
           </div>
         )}
+
+        {followUps.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 }}>
+            <span style={{ fontSize: 11, color: C.inkSoft, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Suggested Follow-ups</span>
+            {followUps.map((q, i) => (
+              <button key={i} onClick={() => send(q)} style={{
+                textAlign: 'left', background: '#fff', border: `1px solid ${C.line}`, borderRadius: 8,
+                padding: '8px 12px', fontSize: 12.5, color: C.teal900, cursor: 'pointer', boxShadow: '0 1px 2px rgba(0,0,0,0.03)'
+              }}>
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
-      {/* Composer — also a drop zone for dragged articles */}
+
+      {/* Investigation Popup */}
+      {investigationResult && createPortal(
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 999999,
+          background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center'
+        }}>
+          <div style={{
+            background: '#fff', borderRadius: 16, width: 720, maxWidth: '90%', height: '80%', maxHeight: 800,
+            display: 'flex', flexDirection: 'column', overflow: 'hidden', boxShadow: '0 24px 64px rgba(0,0,0,0.3)',
+            animation: 'fadeIn 0.2s ease-out'
+          }}>
+            <div style={{ padding: '16px 24px', borderBottom: `1px solid ${C.line}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0, fontSize: 18, color: '#D32F2F', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertTriangle size={18} /> Investigation Results
+              </h2>
+              <button onClick={() => setInvestigationResult(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer' }}><X size={20}/></button>
+            </div>
+            <div className="scroll-thin" style={{ padding: 24, overflowY: 'auto', flex: 1, fontSize: 14, lineHeight: 1.6 }}>
+               <div className="markdown-body">
+                  <Markdown remarkPlugins={[remarkGfm, remarkBreaks]}>{investigationResult}</Markdown>
+                </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      
+ {/* Composer — also a drop zone for dragged articles */}
       <div onDragOver={e => { e.preventDefault(); setDragOver(true) }}
         onDragLeave={() => setDragOver(false)} onDrop={handleDrop}
         style={{
@@ -1646,8 +1868,23 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
 // ROOT APP
 // ─────────────────────────────────────────────────────────────────────────────
 export default function App() {
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => window.removeEventListener('keydown', handleGlobalKeyDown);
+  }, []);
+
+  const [viewingPdf, setViewingPdf] = useState(null);
+  useEffect(() => { _setGlobalPdfUrl = setViewingPdf }, []);
   // Backend
-  const [apiUrl, setApiUrl] = useState('https://0cf5-136-108-84-252.ngrok-free.app')
+  const [apiUrl, setApiUrl] = useState('https://eff1-34-11-161-37.ngrok-free.app')
   const [connected, setConnected] = useState(null)
   const [checking, setChecking] = useState(false)
   const [api, setApi] = useState(null)
@@ -1660,8 +1897,24 @@ export default function App() {
   })
 
   // Workspaces
-  const [workspaces, setWorkspaces] = useState(SEED_WORKSPACES)
-  const [activeWsId, setActiveWsId] = useState(SEED_WORKSPACES[0].id)
+  const [workspaces, setWorkspaces] = useState(() => {
+    try {
+      const saved = localStorage.getItem('newsroom_workspaces')
+      if (saved) return JSON.parse(saved)
+    } catch (e) {}
+    return SEED_WORKSPACES
+  })
+  const [activeWsId, setActiveWsId] = useState(() => {
+    try {
+      const saved = localStorage.getItem('newsroom_activeWsId')
+      if (saved) return saved
+    } catch(e) {}
+    return SEED_WORKSPACES[0].id
+  })
+
+  useEffect(() => {
+    localStorage.setItem('newsroom_activeWsId', activeWsId)
+  }, [activeWsId])
 
   // Per-workspace data maps:  wsId → articles[]
   const [wsResults, setWsResults] = useState<Record<string, any[]>>({})  // raw search feed per ws (transient)
@@ -1675,7 +1928,13 @@ export default function App() {
   // Global id → article lookup. An article that was returned by a search in
   // workspace A but then added to workspace B needs to be resolvable from B
   // even though B's own wsResults slot never contained it.
-  const [articleIndex, setArticleIndex] = useState({})
+  const [articleIndex, setArticleIndex] = useState(() => {
+    try {
+      const saved = localStorage.getItem('newsroom_articleIndex')
+      if (saved) return JSON.parse(saved)
+    } catch (e) {}
+    return {}
+  })
   function indexArticles(list) {
     if (!list?.length) return
     setArticleIndex(idx => {
@@ -1691,6 +1950,26 @@ export default function App() {
   // Search
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
+  const [searchHistory, setSearchHistory] = useState(() => {
+    try {
+      const saved = localStorage.getItem('newsroom_searchHistory')
+      if (saved) return JSON.parse(saved)
+    } catch (e) {}
+    return []
+  })
+
+  useEffect(() => {
+    localStorage.setItem('newsroom_workspaces', JSON.stringify(workspaces))
+  }, [workspaces])
+
+  useEffect(() => {
+    localStorage.setItem('newsroom_articleIndex', JSON.stringify(articleIndex))
+  }, [articleIndex])
+
+  useEffect(() => {
+    localStorage.setItem('newsroom_searchHistory', JSON.stringify(searchHistory))
+  }, [searchHistory])
+
   const [searchErr, setSearchErr] = useState('')
 
   // Manual "Generate timeline / entity map" trigger — a fallback in case the
@@ -1749,7 +2028,7 @@ export default function App() {
   const handleSearch = useCallback(async () => {
     if (!query.trim()) return
     if (!api) { setSearchErr('Connect the backend first.'); return }
-    setSearching(true); setSearchErr('')
+    setSearching(true); setSearchErr(''); setSearchHistory(prev => { const n = [query, ...prev.filter(q => q !== query)].slice(0, 20); return n; })
 
     try {
       let docIds: string[] = []
@@ -1939,7 +2218,9 @@ export default function App() {
           onSelectWs={setActiveWsId} onCreateWs={createWorkspace}
           onOpenFileManager={() => setFileManagerOpen(true)}
           backendDocs={backendDocs} api={api} onIngestDone={handleIngestDone}
-          onDropArticleToWs={handleDropArticleToWs} />
+          onDropArticleToWs={handleDropArticleToWs} 
+          searchHistory={searchHistory} 
+          onHistoryClick={(q) => { setQuery(q); setTimeout(() => document.getElementById('main-search-submit')?.click(), 50); }} />
 
         {/* Main panel */}
         <main style={{
@@ -2051,7 +2332,7 @@ export default function App() {
             <form onSubmit={e => { e.preventDefault(); if (!searching) handleSearch() }}
               style={{ display: 'flex', alignItems: 'center', gap: 0, background: '#fff' }}>
               <Search size={17} strokeWidth={2} style={{ margin: '0 0 0 18px', color: C.inkSoft, flexShrink: 0 }} />
-              <input value={query} onChange={e => {
+              <input ref={searchInputRef} list="search-history-list" value={query} onChange={e => {
                 const v = e.target.value
                 setQuery(v)
                 if (!v.trim()) {
@@ -2070,7 +2351,10 @@ export default function App() {
                   flex: 1, border: 'none', outline: 'none', background: 'transparent',
                   fontSize: 14, color: C.ink, padding: '16px 14px', fontFamily: 'inherit'
                 }} />
-              <button type="submit" disabled={searching || !query.trim()}
+              <datalist id="search-history-list">
+                {searchHistory.map((h, i) => <option key={i} value={h} />)}
+              </datalist>
+              <button id="main-search-submit" type="submit" disabled={searching || !query.trim()}
                 style={{
                   margin: '8px 10px 8px 0', width: 38, height: 38, borderRadius: '50%',
                   background: searching || !query.trim() ? C.lineStrong : C.teal900,
@@ -2090,11 +2374,25 @@ export default function App() {
           onNewSources={handleChatSources} onCreateWs={createWorkspace} />
       </div>
 
-      {openArticle && <SourceDrawer article={openArticle} onClose={() => setOpenArticle(null)} />}
+      {openArticle && <SourceDrawer article={openArticle} onClose={() => setOpenArticle(null)} api={api} />}
       {fileManagerOpen && (
         <FileManager workspaces={workspaces} getArticles={getArticlesForWs}
           backendDocs={backendDocs} onClose={() => setFileManagerOpen(false)}
           onOpenArticle={a => { setFileManagerOpen(false); setOpenArticle(a) }} />
+      )}
+
+      {viewingPdf && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 9999,
+          display: 'flex', flexDirection: 'column'
+        }}>
+          <div style={{ background: '#333', padding: '10px 16px', display: 'flex', justifyContent: 'flex-end' }}>
+            <button onClick={() => setViewingPdf(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <X size={20} /> Close PDF
+            </button>
+          </div>
+          <iframe src={viewingPdf} style={{ width: '100%', flex: 1, border: 'none' }} />
+        </div>
       )}
     </div>
   )
