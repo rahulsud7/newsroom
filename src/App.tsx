@@ -7,7 +7,7 @@ import {
   Search, FileText, ScrollText, Network, Clock, Bookmark, X, ExternalLink,
   Copy, AlertTriangle, Users, Building2, MapPin, Wifi, WifiOff, Loader,
   Send, Filter, CheckCircle, Plus, FolderPlus, PanelRightClose, PanelRightOpen,
-  Bot, Upload, ChevronRight, FolderClosed, GripVertical, FileUp, User,
+  Bot, Upload, ChevronRight, ChevronLeft, History, MessageSquare, ArrowLeft, FolderClosed, GripVertical, FileUp, User,
 } from 'lucide-react'
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -684,7 +684,7 @@ function SourceDrawer({ article, onClose, api }) {
     if (!api || !api.decompose) return;
     setFcSuggestLoading(true);
     try {
-      const res = await api.decompose("Extract main claims to verify from: " + article.title);
+      const res = await api.decompose("Extract main claims to verify from the following article context.\nTitle: " + article.title + "\nContext: " + (article.excerpt || ''));
       const qs = res.questions || res.queries || res.follow_ups || res.sub_questions;
       if (Array.isArray(qs)) setFcSuggestions(qs);
       else if (typeof qs === 'string') setFcSuggestions(qs.split('\n').filter(Boolean));
@@ -887,6 +887,13 @@ function SourceDrawer({ article, onClose, api }) {
 function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genErr }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+
+  const scrollLeft = () => {
+    if (scrollRef.current) scrollRef.current.scrollBy({ left: -600, behavior: 'smooth' })
+  }
+  const scrollRight = () => {
+    if (scrollRef.current) scrollRef.current.scrollBy({ left: 600, behavior: 'smooth' })
+  }
   
   const sorted = [...articles]
     .filter(a => a.date && a.date !== '1970-01-01')
@@ -960,10 +967,29 @@ function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genEr
         )}
       </div>
 
-      <div ref={scrollRef} className="scroll-thin" style={{ flex: 1, overflowX: 'auto', overflowY: 'auto', padding: '0 32px', scrollBehavior: 'smooth' }}>
-        <div style={{ display: 'inline-flex', alignItems: 'center', position: 'relative', height: '100%', minHeight: 480, padding: '0 20px' }}>
-          
-          {/* Continuous Track Line */}
+      <div style={{ position: 'relative', flex: 1, display: 'flex', minHeight: 0 }}>
+        {/* Navigation Arrows */}
+        <button onClick={scrollLeft} style={{
+          position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', zIndex: 30,
+          width: 40, height: 40, borderRadius: '50%', background: '#fff', border: `1px solid ${C.lineStrong}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)', color: C.teal900
+        }}>
+          <ChevronLeft size={20} />
+        </button>
+        <button onClick={scrollRight} style={{
+          position: 'absolute', right: 16, top: '50%', transform: 'translateY(-50%)', zIndex: 30,
+          width: 40, height: 40, borderRadius: '50%', background: '#fff', border: `1px solid ${C.lineStrong}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.05)', color: C.teal900
+        }}>
+          <ChevronRight size={20} />
+        </button>
+
+        <div ref={scrollRef} className="scroll-thin" style={{ flex: 1, overflowX: 'auto', overflowY: 'auto', padding: '0 64px', scrollBehavior: 'smooth' }}>
+          <div style={{ display: 'inline-flex', alignItems: 'center', position: 'relative', height: '100%', minHeight: 480, padding: '0 20px' }}>
+            
+            {/* Continuous Track Line */}
           <div style={{
             position: 'absolute', left: 0, right: 0, top: '50%', height: 2,
             background: C.lineStrong, transform: 'translateY(-50%)', zIndex: 0
@@ -1027,6 +1053,7 @@ function Timeline({ articles, onOpen, onGenerate, generating, canGenerate, genEr
             )
           })}
         </div>
+      </div>
       </div>
     </div>
   )
@@ -1510,6 +1537,11 @@ const SEED_MSGS = [{ role: 'assistant', text: "I'm scoped to this workspace's ar
 
 function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onNewSources, onCreateWs }) {
   const [messages, setMessages] = useState(SEED_MSGS)
+  const [showHistory, setShowHistory] = useState(false)
+  const [history, setHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('chat_history') || '[]') } catch(e) { return [] }
+  })
+  useEffect(() => { localStorage.setItem('chat_history', JSON.stringify(history)) }, [history])
 
   const [draft, setDraft] = useState('')
   const [loading, setLoading] = useState(false)
@@ -1539,6 +1571,7 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
   const [decomposing, setDecomposing] = useState(false);
   const [investigating, setInvestigating] = useState(false);
   const [investigationResult, setInvestigationResult] = useState(null);
+  const [investigateTopic, setInvestigateTopic] = useState('');
 
   async function getFollowUps(topic) {
     if (!api || !api.decompose) return;
@@ -1555,12 +1588,29 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
 
   async function handleInvestigate() {
     if (!api || !api.investigate) return;
-    const lastUserMsg = messages.filter(m => m.role === 'user').pop();
-    const topic = lastUserMsg ? lastUserMsg.text : 'recent topics';
+    const topic = investigateTopic.trim() || messages.filter(m => m.role === 'user').pop()?.text || 'recent topics';
     setInvestigating(true);
     try {
       const res = await api.investigate(topic);
-      const out = res.result || res.reply; setInvestigationResult(typeof out === 'string' ? out : JSON.stringify(res));
+      const out = res.result || res.reply;
+      if (typeof out === 'string') {
+        setInvestigationResult(out);
+      } else {
+        if (res.evidence_sufficiency?.claims_found === 0) {
+           setInvestigationResult(`No significant claims or evidence found regarding "**${res.entity || topic}**" in the retrieved context.\n\nChunks considered: ${res.source_chunks_considered || 0}`);
+        } else if (res.claims || res.contradictions) {
+           let formatted = `**Investigation: ${res.entity || topic}**\n\n`;
+           if (res.claims?.length) {
+              formatted += `**Claims:**\n` + res.claims.map(c => `- ${c}`).join('\n') + '\n\n';
+           }
+           if (res.contradictions?.length) {
+              formatted += `**Contradictions:**\n` + res.contradictions.map(c => `- ${c}`).join('\n') + '\n\n';
+           }
+           setInvestigationResult(formatted);
+        } else {
+           setInvestigationResult(```json\n${JSON.stringify(res, null, 2)}\n```);
+        }
+      }
     } catch (err) {
       setInvestigationResult(`Investigation failed: ${err.message}`);
     } finally {
@@ -1639,28 +1689,57 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
         }}>
           <Bot size={16} strokeWidth={2} /> Archive Assistant
         </span>
-        <button onClick={onToggle} style={{
-          width: 28, height: 28, borderRadius: '50%',
-          background: 'transparent', border: 'none', cursor: 'pointer', color: C.inkSoft,
-          display: 'flex', alignItems: 'center', justifyContent: 'center'
-        }}>
-          <PanelRightClose size={17} strokeWidth={2} />
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button onClick={() => setShowHistory(!showHistory)} title="View Chat History" style={{
+            background: showHistory ? C.teal100 : 'transparent', border: 'none', cursor: 'pointer', color: showHistory ? C.teal900 : C.inkSoft,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 500, padding: '4px 6px', borderRadius: 4
+          }}>
+            <History size={14} style={{ marginRight: 4 }} /> History
+          </button>
+          <button onClick={() => { 
+            if (messages.length > 1) {
+              setHistory(prev => [{ id: Date.now().toString(), date: Date.now(), messages }, ...prev]);
+            }
+            setMessages(SEED_MSGS); setInvestigationResult(null); setFollowUps([]); setDraft(''); setShowHistory(false); 
+          }} title="Reset Chat" style={{
+            background: 'transparent', border: 'none', cursor: 'pointer', color: C.inkSoft,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 500, padding: '4px 6px', borderRadius: 4
+          }}>
+            <Plus size={14} style={{ marginRight: 4 }} /> New
+          </button>
+          <button onClick={onToggle} style={{
+            width: 28, height: 28, borderRadius: '50%',
+            background: 'transparent', border: 'none', cursor: 'pointer', color: C.inkSoft,
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <PanelRightClose size={17} strokeWidth={2} />
+          </button>
+        </div>
       </header>
-      {/* Big Red Investigate Button */}
-      <div style={{ padding: '0 16px 12px', borderBottom: `1px solid ${C.line}` }}>
-         <button onClick={handleInvestigate} disabled={investigating} style={{
-           width: '100%', background: '#D32F2F', color: '#fff', border: 'none', borderRadius: 8, padding: '10px',
-           fontSize: 13, fontWeight: 'bold', cursor: investigating ? 'not-allowed' : 'pointer',
-           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
-           boxShadow: '0 4px 12px rgba(211, 47, 47, 0.25)', transition: 'background 0.2s'
+      {/* Deep Investigation Section */}
+      <div style={{ padding: '0 16px 12px', borderBottom: `1px solid ${C.line}`, display: 'flex', flexDirection: 'column', gap: 8 }}>
+         <input 
+           type="text" 
+           placeholder="Entity to investigate... (e.g. Hurricane)"
+           value={investigateTopic}
+           onChange={e => setInvestigateTopic(e.target.value)}
+           style={{
+             width: '100%', padding: '8px 12px', borderRadius: 6, border: `1px solid ${C.line}`,
+             fontSize: 12.5, outline: 'none', color: C.ink
+           }}
+         />
+         <button onClick={handleInvestigate} disabled={investigating || !investigateTopic.trim()} style={{
+           width: '100%', background: '#D32F2F', color: '#fff', border: 'none', borderRadius: 6, padding: '8px',
+           fontSize: 13, fontWeight: 'bold', cursor: investigating || !investigateTopic.trim() ? 'not-allowed' : 'pointer',
+           display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: investigating || !investigateTopic.trim() ? 0.7 : 1,
+           boxShadow: '0 4px 12px rgba(211, 47, 47, 0.25)', transition: 'all 0.2s'
          }}>
            {investigating ? <Loader size={15} className="spin" /> : <Search size={15} />}
-           {investigating ? 'Investigating...' : 'Investigate Context'}
+           {investigating ? 'Investigating...' : 'Deep Investigate Entity'}
          </button>
       </div>
 
-      {activeWorkspace && (
+      {activeWorkspace && !showHistory && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5,
           color: C.inkSoft, padding: '0 16px 12px'
@@ -1672,8 +1751,33 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
 
       <div className="scroll-thin" style={{
         flex: 1, overflowY: 'auto', padding: '4px 16px 16px',
-        display: 'flex', flexDirection: 'column', gap: 10
+        display: 'flex', flexDirection: 'column', gap: showHistory ? 8 : 10
       }}>
+        {showHistory ? (
+          history.length === 0 ? (
+            <div style={{ fontSize: 13, color: C.inkSoft, textAlign: 'center', marginTop: 20 }}>No chat history yet.</div>
+          ) : (
+            history.map(h => (
+              <div key={h.id} onClick={() => { setMessages(h.messages); setShowHistory(false); }} style={{
+                padding: '12px', background: '#fff', border: `1px solid ${C.line}`, borderRadius: 8, cursor: 'pointer',
+                display: 'flex', flexDirection: 'column', gap: 6, transition: 'all 0.15s'
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.inkSoft, ...mono }}>
+                    <MessageSquare size={12} /> {new Date(h.date).toLocaleDateString()}
+                  </div>
+                  <button onClick={(e) => { e.stopPropagation(); setHistory(history.filter(hx => hx.id !== h.id)); }} style={{ background: 'none', border: 'none', color: C.red, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                    <X size={14} />
+                  </button>
+                </div>
+                <div style={{ fontSize: 13, color: C.ink, fontWeight: 500, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                  {h.messages.filter(m => m.role === 'user')[0]?.text || 'Empty Chat'}
+                </div>
+              </div>
+            ))
+          )
+        ) : (
+          <>
         {messages.map((m: any, i: number) => (
           <div key={i} style={{
             display: 'flex', gap: 8, alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
@@ -1732,8 +1836,9 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
           </div>
         )}
         <div ref={bottomRef} />
+          </>
+        )}
       </div>
-
 
       {/* Investigation Popup */}
       {investigationResult && createPortal(
@@ -1884,7 +1989,7 @@ export default function App() {
   const [viewingPdf, setViewingPdf] = useState(null);
   useEffect(() => { _setGlobalPdfUrl = setViewingPdf }, []);
   // Backend
-  const [apiUrl, setApiUrl] = useState('https://eff1-34-11-161-37.ngrok-free.app')
+  const [apiUrl, setApiUrl] = useState('https://d63e-35-243-236-229.ngrok-free.app')
   const [connected, setConnected] = useState(null)
   const [checking, setChecking] = useState(false)
   const [api, setApi] = useState(null)
@@ -2312,10 +2417,11 @@ export default function App() {
 
           {/* Fixed search bar at bottom (no overlap) */}
           <div style={{
+            position: 'relative',
             margin: '0 24px 24px', flexShrink: 0,
             background: '#fff', borderRadius: 14, border: `1px solid ${C.line}`,
             boxShadow: '0 8px 24px rgba(0,61,66,.16)', overflow: 'hidden',
-            display: 'flex', flexDirection: 'column', zIndex: 10
+            display: 'flex', flexDirection: 'column', zIndex: 20
           }}>
             {/* Feature 4.2: Search Scope Toggle */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '10px 18px 0', background: C.creamDeep }}>
