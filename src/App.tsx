@@ -1705,7 +1705,7 @@ function ChatSidebar({ collapsed, onToggle, activeWorkspace, api, sessionId, onN
     if (!text || loading) return
     setDraft('')
     setFollowUps([])
-    setMessages([{ role: 'user', text }])
+    setMessages(m => [...m, { role: 'user', text }])
     if (!api) {
       setMessages(m => [...m, { role: 'assistant', text: 'Connect the backend (paste your ngrok URL above) before searching the archive.' }])
       return
@@ -2156,7 +2156,7 @@ function ReviewQueue({ api, onOpenReview }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {reviews.map(rev => (
-            <div key={rev.id} onClick={() => onOpenReview(rev)} style={{
+            <div key={rev.review_id} onClick={() => onOpenReview(rev)} style={{
               background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: '16px 20px',
               cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 8, transition: 'all 0.15s', boxShadow: '0 2px 8px rgba(0,0,0,0.02)'
             }} className="fm-row">
@@ -2165,10 +2165,10 @@ function ReviewQueue({ api, onOpenReview }) {
                 <span style={{ fontSize: 11, color: C.inkSoft, ...mono }}>{new Date(rev.created_at).toLocaleString()}</span>
               </div>
               <div style={{ fontSize: 15, fontWeight: 500, color: C.ink, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                {rev.item_type === 'claim' ? rev.claim : rev.topic}
+                {rev.type === 'claim' ? rev.payload?.claim : rev.payload?.topic}
               </div>
               <div style={{ fontSize: 12, color: C.inkSoft, display: 'flex', gap: 16 }}>
-                <span>Type: <strong style={{ color: C.ink }}>{rev.item_type}</strong></span>
+                <span>Type: <strong style={{ color: C.ink }}>{rev.type}</strong></span>
                 {rev.scores && <span>Readiness: <strong style={{ color: rev.scores.publish_readiness_score >= 8 ? '#2E7D32' : C.ink }}>{rev.scores.publish_readiness_score || '?'}/10</strong></span>}
               </div>
             </div>
@@ -2241,13 +2241,13 @@ function ReviewDrawer({ reviewId, api, onClose }) {
             <div style={{ flex: 1, overflowY: 'auto', padding: '24px 32px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <span style={REVIEW_STATUS_STYLE[rev.status] || s.pill('#eee', '#333', 'transparent')}>{rev.status.replace(/_/g, ' ')}</span>
-                <span style={{ fontSize: 12, color: C.inkSoft }}>ID: {rev.id.slice(0,8)}...</span>
+                <span style={{ fontSize: 12, color: C.inkSoft }}>ID: {rev.review_id.slice(0,8)}...</span>
               </div>
 
               <div style={{ background: '#fff', border: `1px solid ${C.line}`, borderRadius: 12, padding: 20, marginBottom: 24 }}>
-                <div style={s.eyebrow}>{rev.item_type === 'claim' ? 'Claim' : 'Story Topic'}</div>
+                <div style={s.eyebrow}>{rev.type === 'claim' ? 'Claim' : 'Story Topic'}</div>
                 <div style={{ fontSize: 16, fontWeight: 500, color: C.ink, marginTop: 8, lineHeight: 1.5 }}>
-                  {rev.item_type === 'claim' ? rev.claim : rev.topic}
+                  {rev.type === 'claim' ? rev.payload?.claim : rev.payload?.topic}
                 </div>
               </div>
 
@@ -2292,7 +2292,7 @@ function ReviewDrawer({ reviewId, api, onClose }) {
                   <button onClick={() => doAction(api.approveReview, note)} disabled={actionLoading} style={{ background: '#2E7D32', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.7 : 1 }}>Approve</button>
                   <button onClick={() => doAction(api.rejectReview, note)} disabled={actionLoading} style={{ background: C.red, color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.7 : 1 }}>Reject</button>
                   <button onClick={() => doAction(api.escalateReview, 'senior_editor', note)} disabled={actionLoading} style={{ background: '#7B5EA7', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: actionLoading ? 0.7 : 1 }}>Escalate</button>
-                  <button onClick={() => doAction(api.requestMoreEvidence, note)} disabled={actionLoading || rev.item_type !== 'claim'} style={{ background: C.tanDeep, color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: actionLoading || rev.item_type !== 'claim' ? 'not-allowed' : 'pointer', opacity: actionLoading || rev.item_type !== 'claim' ? 0.7 : 1 }}>Req Evidence</button>
+                  <button onClick={() => doAction(api.requestMoreEvidence, note)} disabled={actionLoading || rev.type !== 'claim'} style={{ background: C.tanDeep, color: '#fff', border: 'none', padding: '8px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: actionLoading || rev.type !== 'claim' ? 'not-allowed' : 'pointer', opacity: actionLoading || rev.type !== 'claim' ? 0.7 : 1 }}>Req Evidence</button>
                 </div>
               </div>
 
@@ -2327,7 +2327,7 @@ export default function App() {
   const [viewingPdf, setViewingPdf] = useState(null);
   useEffect(() => { _setGlobalPdfUrl = setViewingPdf }, []);
   // Backend
-  const [apiUrl, setApiUrl] = useState('https://d63e-35-243-236-229.ngrok-free.app')
+  const [apiUrl, setApiUrl] = useState('https://17b5-34-185-74-130.ngrok-free.app')
   const [connected, setConnected] = useState(null)
   const [checking, setChecking] = useState(false)
   const [api, setApi] = useState(null)
@@ -2823,6 +2823,7 @@ export default function App() {
       </div>
 
       {openArticle && <SourceDrawer article={openArticle} onClose={() => setOpenArticle(null)} api={api} />}
+      <ReviewDrawer reviewId={openReview?.review_id} api={api} onClose={() => setOpenReview(null)} />
       {fileManagerOpen && (
         <FileManager workspaces={workspaces} getArticles={getArticlesForWs}
           backendDocs={backendDocs} onClose={() => setFileManagerOpen(false)}
